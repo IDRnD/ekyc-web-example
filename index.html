@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>eKYC example</title>
+    <script type="module" src="./idlive-face-capture-web/index-idlf-detector.js"></script>
+    <script type="module" src="./idlive-document-capture-web/index.js"></script>
+</head>
+<body>
+<noscript>
+    <strong>We're sorry but example doesn't work properly without JavaScript enabled. Please enable it to continue.</strong>
+</noscript>
+<div id="app">
+    <div class="camera" id="camera-container">
+        <img src="logo.svg" alt="logo" class="logo" id="logo" />
+        <idlive-face-capture
+            id="face-component"
+            debug="true"
+            class="id-camera"
+            hidden
+        ></idlive-face-capture>
+    </div>
+    <div id="error"></div>
+    <div class="control">
+        <button onclick="openCamera()" id="btn-start" disabled>Get Started</button>
+        <button onclick="startAgain()" id="btn-start-again" hidden>Start Again</button>
+    </div>
+    <div class="detection">
+        <b>Detection error:</b> <span id="face-detection"></span>
+    </div>
+    <div class="result">
+        <div class="result__label">
+            Results:
+            <span id="result-loading" hidden></span>
+        </div>
+        <div id="result-list"></div>
+    </div>
+</div>
+
+</body>
+<script type="module">
+    import { DOCUMENT_LICENSE, FACE_LICENSE, EKYC_BACKEND_URL, CHECK_MODEL, API_KEY } from './config.js'
+
+    const btnStart = document.getElementById('btn-start');
+    const btnStartAgain = document.getElementById('btn-start-again');
+    const faceCamera = document.getElementById('face-component');
+    const logo = document.getElementById('logo');
+    const faceDetection = document.getElementById('face-detection');
+    const error = document.getElementById('error');
+    const resultLoading = document.getElementById('result-loading');
+    const resultList = document.getElementById('result-list');
+    const cameraContainer = document.getElementById('camera-container');
+
+    let faceEncryptedBlob = null
+    let docEncryptedBlob = null
+
+    faceCamera.addEventListener("beforeOpen", () => {
+        logo.hidden = true;
+        faceCamera.hidden = false;
+        btnStart.disabled = true;
+        error.textContent = '';
+    });
+
+    const detection = (event) => {
+        faceDetection.textContent = event.detail[0].errors.join(', ');
+    }
+    const errorHandler = (event) => {
+        console.log(event.detail[0])
+        error.textContent = event.detail[0].message;
+    }
+    faceCamera.addEventListener("error", errorHandler);
+    faceCamera.addEventListener("detection", detection);
+    faceCamera.addEventListener('open', () => {
+        btnStart.disabled = false;
+        btnStart.hidden = true;
+    });
+    faceCamera.addEventListener('capture', (event) => {
+        console.log('capture', event.detail[0]);
+
+        const { encryptedFile } = event.detail[0];
+
+        faceEncryptedBlob = encryptedFile
+
+        openDocumentCamera()
+    });
+    faceCamera.addEventListener('initialize', () => {
+        btnStart.disabled = false;
+        faceCamera.setLicense(FACE_LICENSE, 'faceDetector');
+    });
+
+    const startAgain = () => {
+        window.location.href = ''
+    }
+
+    const openCamera = () => {
+        faceCamera.openCamera();
+    }
+
+    const openDocumentCamera = () => {
+        faceCamera.remove()
+
+        const documentCamera = document.createElement('idlive-document-capture');
+        documentCamera.classList.add('id-camera')
+        cameraContainer.appendChild(documentCamera)
+
+        documentCamera.addEventListener('capture', (event) => {
+            console.log('capture', event.detail[0]);
+            const { encryptedFile } = event.detail[0];
+            docEncryptedBlob = encryptedFile
+            documentCamera.hidden = true
+
+            processData()
+        });
+        documentCamera.addEventListener('initialize', setDocumentLicense);
+
+        documentCamera.addEventListener("error", errorHandler)
+        documentCamera.addEventListener("detection", detection);
+
+        function setDocumentLicense() {
+            documentCamera.setLicense(DOCUMENT_LICENSE, 'faceDetector');
+            console.log('setDocumentLicense')
+            documentCamera.openCamera();
+        }
+    }
+
+    const processData = () => {
+        resultLoading.hidden = false
+        logo.hidden = false
+        doCheck(faceEncryptedBlob, docEncryptedBlob)
+            .then(res => {
+                console.log(res)
+                printResult(res)
+            })
+            .catch(e => {
+                console.log(e)
+                printResult(e)
+            })
+            .finally(() => {
+                resultLoading.hidden = true
+                btnStartAgain.hidden = false
+                resultList.hidden = false
+            })
+    }
+
+    function doCheck(faceEncryptedBlob, docEncryptedBlob) {
+        const formData = new FormData();
+        formData.append('face', faceEncryptedBlob)
+        formData.append('doc', docEncryptedBlob)
+        formData.append('checkModel', new Blob([JSON.stringify(CHECK_MODEL)], {
+            type: "application/json"
+        }))
+
+        return fetch(`${EKYC_BACKEND_URL}/check`, {
+            method: 'POST',
+            headers: {
+                'x-api-key': API_KEY
+            },
+            body: formData,
+
+        })
+            .then(res => res.json())
+    }
+
+    function printResult(result) {
+        const container = document.createElement("div");
+
+        function createList(key, value) {
+            const div = document.createElement("div");
+
+            if (Array.isArray(value)) {
+                div.innerHTML = `<div class="result-key">${key}:</div>`;
+                const arrayContainer = document.createElement("div");
+                arrayContainer.className = "array";
+                value.forEach((item, index) => {
+                    arrayContainer.appendChild(createList(`Item ${index + 1}`, item));
+                });
+                div.appendChild(arrayContainer);
+            } else if (typeof value === "object" && value !== null) {
+                div.innerHTML = `<div class="result-key">${key}:</div>`;
+                const objectContainer = document.createElement("div");
+                objectContainer.className = "object";
+                for (const [subKey, subValue] of Object.entries(value)) {
+                    objectContainer.appendChild(createList(subKey, subValue));
+                }
+                div.appendChild(objectContainer);
+            } else {
+                div.innerHTML = `<span class="result-inner-key">${key}:</span> <span class="result-value">${value}</span>`;
+            }
+
+            return div;
+        }
+
+        for (const [key, value] of Object.entries(result)) {
+            container.appendChild(createList(key, value));
+        }
+        resultList.appendChild(container)
+    }
+
+    window.openCamera = openCamera;
+    window.startAgain = startAgain;
+</script>
+<style>
+    body {
+        background: whitesmoke;
+    }
+
+    #app {
+        font-family: 'Avenir', Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-align: center;
+        color: #2c3e50;
+        max-width: 800px;
+        margin: auto;
+    }
+
+    .id-camera {
+        width: 100%;
+        height: 100%;
+    }
+
+    .control button {
+        margin: 20px;
+        padding: 10px;
+        border: none;
+        background: #4ca585;
+        border-radius: 5px;
+        color: white;
+        font-size: 15px;
+    }
+
+    .control button:disabled {
+        background: #aaa;
+    }
+
+    .settings {
+        text-align: left;
+        margin-top: 10px;
+    }
+
+    .settings > div {
+        margin: 3px 0;
+    }
+
+    #result-loading:after,
+    button:disabled:after  {
+        content: "☼";
+        display: inline-block;
+        margin-left: 8px;
+        animation: lds-dual-ring 2.5s linear infinite;
+    }
+
+    @keyframes lds-dual-ring {
+        0% {
+            transform: rotate(0deg);
+        }
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    .logo {
+        max-width: 360px;
+        width: 100%;
+    }
+
+    .camera {
+        height: 300px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .control {
+        display: flex;
+        justify-content: center;
+        min-height: 80px;
+    }
+
+    .result {
+        text-align: start;
+    }
+
+    .result__label {
+        font-weight: bold;
+        margin-top: 40px;
+        font-size: 22px;
+    }
+
+    .detection {
+        text-align: left;
+        color: #a40e26;
+    }
+
+    #error {
+        color: red;
+    }
+
+    .result-key {
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+
+    .object, .array {
+        margin-left: 20px;
+        margin-bottom: 10px;
+    }
+
+    .result-inner-key {
+        color: #007bff;
+        font-weight: bold;
+    }
+
+    .result-value {
+        margin-left: 5px;
+    }
+</style>
+</html>
