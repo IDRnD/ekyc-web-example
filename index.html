@@ -104,7 +104,7 @@
         const documentCamera = document.createElement('idlive-document-capture');
         documentCamera.classList.add('id-camera')
         cameraContainer.appendChild(documentCamera)
-
+        initDocMask()
         documentCamera.addEventListener('capture', (event) => {
             console.log('capture', event.detail[0]);
             const { encryptedFile } = event.detail[0];
@@ -123,6 +123,64 @@
             console.log('setDocumentLicense')
             documentCamera.openCamera();
         }
+    }
+
+    const initDocMask = () => {
+        const camera = document.querySelector("idlive-document-capture");
+        let videoObserver;
+        let canvas;
+
+        const img = new Image();
+        img.src = './mask-doc.svg';
+
+        function drawDocumentMask(video, canvas) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.style.width = video.style.width;
+            canvas.style.height = video.style.height;
+
+            const canvasCtx = canvas.getContext('2d');
+
+            const isVideoPortrait = video.videoWidth < video.videoHeight;
+
+            const hScale = video.videoWidth / img.width;
+            const vScale = video.videoHeight / img.height;
+            const scale = Math.min(hScale, vScale);
+
+            const paddingX = isVideoPortrait ? 50 : 200;
+            const paddingY = isVideoPortrait ? 25 : 100;
+
+            const width = (img.width * scale) - paddingX * 2;
+            const height = (img.height * scale) - paddingY * 2;
+
+            const leftShift = (canvas.width - width) / 2;
+            const topShift = (canvas.height - height) / 2;
+
+            canvasCtx?.drawImage(img, 0, 0, img.width, img.height, leftShift, topShift, width, height);
+        }
+
+        function addDocumentMask(video) {
+            canvas = document.createElement('canvas');
+            canvas.style.position = 'absolute';
+            canvas.style.zIndex = '102';
+            video.parentNode.appendChild(canvas);
+
+            videoObserver = new ResizeObserver(() => drawDocumentMask(video, canvas));
+            videoObserver.observe(video);
+        }
+
+        function removeDocumentMask() {
+            videoObserver?.disconnect();
+            canvas?.remove();
+        }
+
+        camera.addEventListener('open', (event) => {
+            addDocumentMask(event.detail[0].video);
+        });
+
+        camera.addEventListener('close', () => {
+            removeDocumentMask();
+        });
     }
 
     const processData = () => {
